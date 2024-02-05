@@ -1,0 +1,554 @@
+cls:sprite clear
+gload "graphics.gfx"
+
+
+' Screen placement controls
+x_off = 10
+y_off = 30
+invader_rank_start_x = 24 + x_off
+invader_rank_start_y = 80 + y_off
+min_rank_x = 10 + x_off
+max_rank_x = 200 + x_off
+shield_start_x = 32 - 5 + x_off
+shield_start_y = 128 + y_off
+player_start_x = 35 + x_off
+player_start_y = 165 + y_off
+player_min_x = 8 + x_off
+player_max_x = 200 + x_off
+baseline_start_x = shield_start_x - 32
+baseline_end_x = shield_start_x + (32 * 4) + (13 * 3) + 32
+baseline_start_y = 190 + y_off
+saucer_start_x = 8 + x_off
+saucer_start_y = 0 + y_off
+
+invader_sprite_start = 0
+invader_shot1_sprite = invader_sprite_start + 55
+invader_shot2_sprite = invader_shot1_sprite + 1
+invader_shot3_sprite = invader_shot2_sprite + 1
+invader_off_x = 24
+invader_off_y = 80
+invader_cursor = 0
+rank_swap = 0
+invader_direction = 2
+invader_x = 0
+invader_y = 0
+invader_t = 0
+invader_exploding = -1
+invader_explode_timer = 0
+tinvaders = 0
+invader_shot_timer = 2
+invader_shot_speed = 4
+invader_shoot_rate = $30
+invader_can_shoot = false
+invader_did_shoot = false
+
+' Invader shot data blocks
+d = 0
+shot1_off = 0
+shot2_off = 10
+shot3_off = 20
+invader_shots = alloc(30)
+for i = 0 to 29: read d: poke invader_shots + i, d:next
+' status, x, y, sprite, counter, column, spr2, spr2, spr3, spr4
+data $0, $0, $0, invader_shot1_sprite, $0, $0, $8B, $8C, $8B, $8D
+data $0, $0, $0, invader_shot2_sprite, $0, $0, $8E, $8F, $90, $91
+data $0, $0, $0, invader_shot3_sprite, $0, $6, $92, $93, $94, $95
+
+dim invader_col_fire_table(22)
+for i = 0 to 21: read invader_col_fire_table(i):next
+data $0, $6, $0, $0, $0, $3, $a, $0, $5, $2, $0, $0, $0, $a, $8, $1, $7, $1, $a, $3, $6, $9
+
+dim invader_scores(5)
+for i = 0 to 4: read invader_scores(i):next
+data 10, 10, 20, 20, 30
+
+
+player_sprite = invader_shot3_sprite + 1
+player_shot_sprite = player_sprite + 1
+player_x = 35
+player_y = 165
+player_shot_x = 0
+player_shot_y = 0
+player_shot_active = false
+plaeyr_shot_debouce = false
+player_hit = false
+player_hit_timer = 0
+player_hit_flash = 0
+player_hit_frame = 0
+player_score = 0
+player_lives = 3
+player_score_changed = false
+player_lives_changed = false
+tplayer = 0
+
+saucer_sprite = player_shot_sprite + 1
+
+
+tgui = 0
+
+invaders = alloc(55)
+invader_count = 55
+
+game_over = false
+
+
+repeat
+  call newGame()
+until 0
+
+end
+
+
+proc newGame()
+  cls:sprite clear
+  while inkey$() <> "": wend
+  text "SPACE INVADERS" to 111,80
+  text "PRESS ANY KEY" to 115, 100
+  repeat
+  until inkey$() <> ""
+
+  cls:sprite clear
+  call initInvaders()
+  call initPlayer()
+  call drawShields()
+  call drawGUI()
+  call drawBaseLine()
+
+  sprite saucer_sprite image $C1 to saucer_start_x,saucer_start_y anchor 7
+
+  game_over = false
+
+  repeat
+    ft = time()
+    if event(tgui, 4)
+      call updateScoreDisplay()
+      call updateLivesDisplay()
+    endif
+    if event(tplayer, 1)
+      call movePlayer()
+      call drawPlayer()
+      call updatePlayerShot()
+    endif
+    if event(tinvaders, 1) 
+      if invader_exploding >= 0
+        invader_explode_timer = invader_explode_timer - 1
+        if invader_explode_timer <= 0
+          sprite (invader_sprite_start + invader_exploding) to -16, -16 anchor 7
+          invader_exploding = -1
+        endif
+      else
+        invader_cursor = invader_cursor + 1
+        if invader_cursor >= invader_count
+          invader_cursor = 0
+          invader_frame = (invader_frame + 1) & 1
+          if rank_swap = 1
+            invader_direction = -invader_direction
+            invader_off_y = invader_off_y + 8
+            rank_swap = 0
+          endif
+          invader_off_x = invader_off_x + invader_direction
+        endif
+        call drawInvaders()
+        call doInvaderShoot()
+      endif
+    endif
+    ft = time() - ft
+    ' rect ink 0 solid 10,10 to 100,20
+    ' text str$(ft * 10) ink 7 dim 1 to 10,10
+    cursor 0,0
+  until game_over
+
+  while inkey$() <> "": wend
+  local xpos
+  xpos = 160 - ((9 * 14) \ 2)
+  sfx 0, 10
+  sprite clear
+  repeat
+    text "GAME OVER" ink rand(16) dim 2 solid to xpos,100
+  until inkey$() <> ""
+endproc
+
+
+proc drawGUI()
+  text "SPACE" ink 6 dim 1 solid to 252, 10
+  text "INVADERS" ink 6 dim 1 solid to 252-10, 20
+  text "SCORE" ink 7 dim 1 solid to 252, 30
+  call updateScoreDisplay()
+endproc
+
+
+proc updateScoreDisplay()
+  if player_score_changed
+    text right$("00000"+str$(player_score), 5) ink 7 dim 1 solid to 252, 56
+    player_score_changed = false
+  endif
+endproc
+
+
+proc updateLivesDisplay()
+  if player_lives_changed
+    local xpos
+    xpos = 262
+    rect ink 8 solid from 262,200 to 262+(16*3),216
+    for i = 0 to (player_lives - 1)
+      image $86 to xpos, 200
+      xpos = xpos + 16
+    next
+    player_lives_changed = false
+    if player_lives <= 0
+      game_over = true
+    endif
+  endif
+endproc
+
+
+proc drawBaseLine()
+  line ink 2 from baseline_start_x,baseline_start_y to baseline_end_x,baseline_start_y
+endproc
+
+
+proc initInvaders() 
+  for i = 0 to 54
+    poke invaders + i, i
+  next
+  rank_swap = 0
+  invader_off_x = invader_rank_start_x
+  invader_off_y = invader_rank_start_y
+  invader_direction = 2
+  invader_cursor = -1
+  invader_count = 55
+endproc
+
+
+proc removeInvader(invader)
+  local done, index
+  done = false
+  index = 0
+  repeat
+    if peek(invaders + index) = invader
+      while index < invader_count
+        poke invaders + index, peek(invaders + index + 1)
+        index = index + 1
+      wend
+      done = true
+    else
+      index = index + 1
+      if index >= invader_count then done = true
+    endif
+  until done = true
+  sprite (invader_sprite_start + invader) image $89
+  invader_count = invader_count - 1
+  invader_exploding = invader
+  invader_explode_timer = $10
+endproc
+
+
+proc drawInvaders()
+  local invader
+  invader = peek(invaders + invader_cursor)
+  call getInvaderPos(invader)
+  if invader_x >= max_rank_x | invader_x <= min_rank_x
+    rank_swap = 1
+  endif
+  sprite invader image $80 + invader_t to invader_x, invader_y anchor 7
+endproc
+
+
+proc checkShotDelay(a, b)
+  invader_can_shoot = true
+  if a > 0
+    if a < invader_shoot_rate
+      invader_can_shoot = false
+    endif
+  endif
+  if b > 0
+    if b < invader_shoot_rate
+      invader_can_shoot = false
+    endif
+  endif
+endproc
+
+
+proc processInvaderShot(off, other_off, other2_off)
+  local column_offset, column, shot_x, shot_y
+  invader_did_shoot = false
+  if peek(invader_shots + off) = 0 ' Check status
+    ' Not shooting, check if we can shoot this type.
+    call checkShotDelay(peek(invader_shots + other_off + 4), peek(invader_shots + other2_off + 4))
+    if invader_can_shoot = true
+      column_offset = peek(invader_shots + off + 5)
+      if column_offset < 0
+        ' Find closest column to player
+        column = ((player_x + 8) - invader_off_x) >> 4
+      else
+        column = invader_col_fire_table(column_offset)
+      endif 
+      if column >= 0
+        call getBottomInvaderInCol(column)
+        if invader_x >= 0
+          poke invader_shots + off + 1, invader_x + 7
+          poke invader_shots + off + 2, invader_y
+          poke invader_shots + off + 0, 1
+          poke invader_shots + off + 4, 1
+          invader_did_shoot = true
+        endif
+      endif
+    endif
+  else
+    ' Shooting, process the shot and check for collisions.
+    shot_x = peek(invader_shots + off + 1)
+    shot_y = peek(invader_shots + off + 2)
+    if shot_y > player_y + 16
+      poke invader_shots + off + 0, 0
+      poke invader_shots + off + 4, 0
+      sprite peek(invader_shots + off + 3) to -16, -16 anchor 7
+    else
+      f = peek(invader_shots + off + 4) % 4
+      f = peek(invader_shots + off + 6 + f)
+      call checkPlayerHit(shot_x, shot_y + 4)
+      if player_hit = true
+        poke invader_shots + off + 0, 0
+        poke invader_shots + off + 4, 0
+        sprite peek(invader_shots + off + 3) to -16, -16 anchor 7
+      else
+        ' Check hit shields
+        local hit, offset
+        offset = -1
+        hit = point(shot_x, shot_y + 3)
+        if hit <> 0 & hit <> 8
+          offset = 3
+        else
+          hit = point(shot_x, shot_y + 2)
+          if hit <> 0 & hit <> 8
+            offset = 2
+          else
+            hit = point(shot_x, shot_y + 2)
+            if hit <> 0 & hit <> 8
+              offset = 1
+            else
+              hit = point(shot_x, shot_y)
+              if hit <> 0 & hit <> 8
+                offset = 0
+              endif
+            endif
+          endif
+        endif
+        if offset >= 0 
+          image $8A frame to (shot_x - 8), (shot_y - (4 - offset))
+          poke invader_shots + off + 0, 0
+          poke invader_shots + off + 4, 0
+          sprite peek(invader_shots + off + 3) to -16, -16 anchor 7
+          ' sfx 0, 4
+        else
+          sprite peek(invader_shots + off + 3) image f to shot_x, shot_y anchor 7
+          poke invader_shots + off + 4, peek(invader_shots + off + 4) + 1
+          poke invader_shots + off + 2, shot_y + 4
+        endif
+      endif
+    endif
+  endif
+endproc
+
+
+proc doInvaderShoot()
+  local column_offset, shot_x, shot_y, f
+  ' TODO: If player exploding, cancel shots
+  if invader_shot_timer = 0
+    call processInvaderShot(shot1_off, shot2_off, shot3_off)
+  else 
+    if invader_shot_timer = 1
+      call processInvaderShot(shot2_off, shot1_off, shot3_off)
+      if invader_did_shoot = true
+        column_offset = peek(invader_shots + shot2_off + 5)
+        if column_offset >= $10
+          column_offset = $0
+        else 
+          column_offset = column_offset + 1
+        endif
+        poke invader_shots + shot2_off + 5, column_offset
+      endif
+    else
+      if invader_shot_timer = 2
+        call processInvaderShot(shot3_off, shot1_off, shot2_off)
+        if invader_did_shoot = true
+          column_offset = peek(invader_shots + shot3_off + 5)
+          if column_offset >= $15
+            column_offset = $6
+          else 
+            column_offset = column_offset + 1
+          endif
+          poke invader_shots + shot3_off + 5, column_offset
+        endif
+      endif
+    endif
+  endif
+  invader_shot_timer = (invader_shot_timer + 1) % 3
+endproc
+
+
+proc checkPlayerHit(x, y)
+  if x >= (player_x + 2) & x <= (player_x + 14) & y >= (player_y + 5) & y <= (player_y + 11)
+    player_hit = true
+    player_hit_timer = $C * $5
+    player_hit_flash = 0
+    sfx 0, 19
+  endif
+endproc
+
+
+proc getBottomInvaderInCol(col)
+  invader_x = -1
+  local col_b, row
+  col_b = col
+  row = 0
+  if col >= 0 & col < 11
+    repeat
+      for i = 0 to invader_count - 1
+        if peek(invaders + i) = col
+          invader_x = invader_off_x + (col_b << 4)
+          invader_y = invader_off_y - (row << 4)
+        endif
+      next
+      col = col + 11
+      row = row + 1
+    until col >= 55 | invader_x > 0 
+  endif
+endproc
+
+
+proc getInvaderPos(index)
+  invader_x = invader_off_x + ((index % 11) << 4)
+  local row
+  row = index \ 11
+  invader_y = invader_off_y - (row << 4)
+  invader_t = (row \ 2) << 1 + invader_frame
+endproc
+
+
+proc initPlayer() 
+  player_x = player_start_x
+  player_y = player_start_y
+  player_shot_active = false
+  player_score = 0
+  player_lives = 3
+  player_score_changed = true
+  player_lives_changed = true
+endproc
+
+
+proc movePlayer()
+  local fire, dx, dy
+  if player_hit <> true
+    fire = joypad(dx, dy)
+    player_x = max(player_min_x, min(player_max_x, player_x + dx))
+    if fire <> 0 & player_shot_active = false & player_shot_debounce = false
+      player_shot_x = player_x + 8
+      player_shot_y = player_y
+      player_shot_active = true
+      player_shot_debounce = true
+      sfx 0, 7
+    else
+      if fire = 0 & player_shot_debounce = true
+        player_shot_debounce = false
+      endif
+    endif
+  endif
+endproc
+
+
+proc drawPlayer()
+  if player_hit
+    player_hit_timer = player_hit_timer - 1
+    if player_hit_timer <= 0
+      player_hit = false
+      player_x = 35
+      player_lives = player_lives - 1
+      player_lives_changed = true
+    else
+      player_hit_flash = player_hit_flash + 1
+      if player_hit_flash >= 5
+        player_hit_flash = 0
+        player_hit_frame = (player_hit_frame + 1) % 2
+      endif
+      sprite player_sprite image $96 + player_hit_frame to player_x, player_y anchor 7
+    endif
+  else
+    sprite player_sprite image $86 to player_x, player_y anchor 7
+  endif
+endproc
+
+
+proc updatePlayerShot()
+  local hit, offset
+  if player_shot_active = true
+    sprite player_shot_sprite image $88 to player_shot_x, player_shot_y anchor 7
+    player_shot_y = player_shot_y - 4
+    if player_shot_y < 0
+      player_shot_active = false
+      sprite player_shot_sprite image $88 to -16, -16 anchor 7
+    else
+      if player_shot_x > invader_off_x & player_shot_x < (invader_off_x + 176) & player_shot_y < (invader_off_y + 16) & player_shot_y > (invader_off_y - 64)
+        local inv_hit_row, inv_hit_col, inv_hit
+        inv_hit_row = ((invader_off_y + 16) - player_shot_y) >> 4
+        inv_hit_col = (player_shot_x - invader_off_x) >> 4 
+        inv_hit = inv_hit_row * 11 + inv_hit_col
+        invader_t = inv_hit_row >> 1
+        inv_sprite_x = spritex(invader_sprite_start + inv_hit)
+        if inv_hit_row >= 0 & inv_hit_row < 5 & inv_sprite_x >= 0 
+          hit = spoint(player_shot_x, player_shot_y)
+          if hit <> 0
+            call removeInvader(inv_hit)
+            player_score = player_score + invader_scores(inv_hit_row)
+            player_score_changed = true
+            player_shot_active = false
+            sprite player_shot_sprite to -16, -16 anchor 7
+            sfx 0, 19
+          endif
+        endif
+      else
+        offset = -1
+        hit = point(player_shot_x, player_shot_y + 3)
+        if hit <> 0 & hit <> 8
+          offset = 3
+        else
+          hit = point(player_shot_x, player_shot_y + 2)
+          if hit <> 0 & hit <> 8
+            offset = 2
+          else
+            hit = point(player_shot_x, player_shot_y + 2)
+            if hit <> 0 & hit <> 8
+              offset = 1
+            else
+              hit = point(player_shot_x, player_shot_y)
+              if hit <> 0 & hit <> 8
+                offset = 0
+              endif
+            endif
+          endif
+        endif
+        if offset >= 0 
+          image $8A frame to (player_shot_x - 8), (player_shot_y - (4 - offset))
+          player_shot_active = false
+          sprite player_shot_sprite to -16, -16 anchor 7
+          ' sfx 0, 4
+        endif
+      endif
+    endif
+  endif
+endproc
+
+
+proc drawShields()
+  local xpos, ypos
+  xpos = shield_start_x
+  ypos = shield_start_y
+  image $C0 to xpos, ypos
+  xpos = xpos + (28 + 23 - 5)
+  image $C0 to xpos, ypos
+  xpos = xpos + (28 + 23 - 5)
+  image $C0 to xpos, ypos
+  xpos = xpos + (28 + 23 - 5)
+  image $C0 to xpos, ypos
+endproc
+
+

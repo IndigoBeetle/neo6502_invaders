@@ -1,0 +1,5 @@
+**/*.bas
+**/*.gfx
+storage
+memory.dump
+.DS_Store
